@@ -100,28 +100,22 @@ async function ga4Ads(dateIso) {
 }
 
 // Merchant Center: preces limena kliksi un raditijumi pa katru sub-kontu.
-const MC_VER = ['v1'];
-
+// Content API v2.1 (Merchant API v1 prasa cilveka registraciju, servisa kontam liegts).
 async function mcOne(acc, dateIso) {
-  const q = "SELECT offer_id, date, clicks, impressions, conversions, conversion_value_micros FROM product_performance_view WHERE date BETWEEN '" + dateIso + "' AND '" + dateIso + "'";
-  let last = null;
-  for (const v of MC_VER) {
-    try {
-      const j = await post('https://merchantapi.googleapis.com/reports/' + v + '/accounts/' + acc + '/reports:search', S_MC, { query: q, pageSize: 1000 });
-      return (j.results || []).map((r) => {
-        const p = r.productPerformanceView || {};
-        return {
-          ext_id: String(p.offerId || ''),
-          clicks: Math.round(num(p.clicks)),
-          impr: Math.round(num(p.impressions)),
-          ord: Math.round(num(p.conversions)),
-          rev: Number((num(p.conversionValueMicros) / 1e6).toFixed(2)),
-          konts: String(acc)
-        };
-      }).filter((r) => r.ext_id);
-    } catch (e) { last = e; }
-  }
-  throw last || new Error('Merchant API nav pieejams');
+  const q = "SELECT segments.date, segments.offer_id, metrics.clicks, metrics.impressions, metrics.conversions, metrics.conversion_value_micros FROM MerchantPerformanceView WHERE segments.date BETWEEN '" + dateIso + "' AND '" + dateIso + "'";
+  const j = await post('https://shoppingcontent.googleapis.com/content/v2.1/' + acc + '/reports/search', S_MC, { query: q, pageSize: 1000 });
+  return (j.results || []).map((r) => {
+    const s = r.segments || {};
+    const m = r.metrics || {};
+    return {
+      ext_id: String(s.offerId || ''),
+      clicks: Math.round(num(m.clicks)),
+      impr: Math.round(num(m.impressions)),
+      ord: Math.round(num(m.conversions)),
+      rev: Number((num(m.conversionValueMicros) / 1e6).toFixed(2)),
+      konts: String(acc)
+    };
+  }).filter((r) => r.ext_id);
 }
 
 async function mc(dateIso) {
