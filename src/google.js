@@ -1,4 +1,4 @@
-onst crypto = require('crypto');
+const crypto = require('crypto');
 
 // Viens servisa konts abiem: Search Console un GA4.
 const RAW = process.env.GOOGLE_SA_JSON || '';
