@@ -115,6 +115,7 @@ function start(port) {
       return send(200, 'application/json', JSON.stringify(out, null, 2));
     }
       if (url.pathname === '/api/fx') return send(200, 'application/json', JSON.stringify(await fx.monthly(url.searchParams.get('from') || '2024-01-01', url.searchParams.get('to') || '2030-01-01')));
+      if (url.pathname === '/fx') { if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas'); return send(200, 'application/json', JSON.stringify(await fx.refresh(url.searchParams.get('full') === '1'))); }
 
     return send(200, 'text/html', page(await summary()));
     } catch (e) {
