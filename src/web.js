@@ -10,7 +10,7 @@ async function summary() {
   const last = await cfgGet('pedeja_darbiba');
   const day = await cfgGet('pedeja_diena');
 
-const perPlatform = await pool.query('SELECT m.platform, COUNT(DISTINCT m.date)::int AS dienas, SUM(COALESCE(m.pv_d,0))::int AS pv, SUM(COALESCE(m.ord,0))::int AS ord, SUM(COALESCE(m.rev,0))::numeric AS rev, (SELECT COUNT(*) FROM items i WHERE i.platform = m.platform)::int AS preces, (SELECT COUNT(*) FROM chlog c WHERE c.platform = m.platform)::int AS izmainas FROM metrics m WHERE m.date > CURRENT_DATE - 31 GROUP BY m.platform ORDER BY m.platform');
+const perPlatform = await pool.query('SELECT m.platform, COUNT(DISTINCT m.date)::int AS dienas, SUM(COALESCE(m.pv_d,0))::int AS pv, SUM(COALESCE(m.ord,0))::int AS ord, SUM(COALESCE(m.rev,0))::numeric AS rev, SUM(COALESCE(m.spend,0))::numeric AS spend, (SELECT COUNT(*) FROM items i WHERE i.platform = m.platform)::int AS preces, (SELECT COUNT(*) FROM chlog c WHERE c.platform = m.platform)::int AS izmainas FROM metrics m WHERE m.date > CURRENT_DATE - 31 GROUP BY m.platform ORDER BY m.platform');
 
 const days = await pool.query('SELECT date, platform, SUM(COALESCE(pv_d,0))::int AS pv, SUM(COALESCE(ord,0))::int AS ord, SUM(COALESCE(rev,0))::numeric AS rev FROM metrics WHERE date > CURRENT_DATE - 15 GROUP BY date, platform ORDER BY date DESC, platform');
 
@@ -27,7 +27,7 @@ const money = (v) => Number(v || 0).toFixed(2);
 const CSS = ':root{color-scheme:dark}body{margin:0;padding:20px;background:#14141c;color:#e8e8ee;font:15px/1.5 system-ui,sans-serif}h1{font-size:20px;letter-spacing:2px;margin:0 0 4px}h2{font-size:13px;text-transform:uppercase;letter-spacing:1px;opacity:.5;margin:28px 0 8px}.note{opacity:.55;font-size:13px}table{border-collapse:collapse;width:100%;max-width:1000px;font-size:14px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #2a2a36;vertical-align:top}th{opacity:.5;font-weight:500;font-size:12px;text-transform:uppercase}td:nth-child(n+3),th:nth-child(n+3){text-align:right}table.chg td,table.chg th{text-align:left}a{color:#9db8ff;text-decoration:none}';
 
 function page(d) {
-  const plat = d.platformas.map((r) => '<tr><td>' + esc(r.platform) + '</td><td>' + esc(r.preces) + '</td><td>' + esc(r.dienas) + '</td><td>' + esc(r.pv) + '</td><td>' + esc(r.ord) + '</td><td>' + money(r.rev) + '</td><td>' + esc(r.izmainas) + '</td></tr>').join('');
+  const plat = d.platformas.map((r) => '<tr><td>' + esc(r.platform) + '</td><td>' + esc(r.preces) + '</td><td>' + esc(r.dienas) + '</td><td>' + esc(r.pv) + '</td><td>' + esc(r.ord) + '</td><td>' + money(r.rev) + '</td><td>' + money(r.spend) + '</td><td>' + esc(r.izmainas) + '</td></tr>').join('');
 
 const days = d.dienas.map((r) => '<tr><td>' + esc(d10(r.date)) + '</td><td>' + esc(r.platform) + '</td><td>' + esc(r.pv) + '</td><td>' + esc(r.ord) + '</td><td>' + money(r.rev) + '</td></tr>').join('');
 
@@ -45,7 +45,7 @@ return '<!doctype html><meta charset="utf-8"><title>EWART WOODS - dati</title>' 
   '<h1>EWART WOODS</h1>' +
   '<div class="note">Pedeja darbiba: ' + esc(d.pedeja_darbiba || 'vel nav palaista') + '</div>' +
   '<h2>Platformas (30 dienas)</h2>' +
-  '<table><tr><th>Platforma</th><th>Preces</th><th>Dienas</th><th>PV</th><th>ORD</th><th>REV</th><th>Izmainas</th></tr>' + (plat || empty(7)) + '</table>' +
+  '<table><tr><th>Platforma</th><th>Preces</th><th>Dienas</th><th>PV</th><th>ORD</th><th>REV</th><th>Reklama</th><th>Izmainas</th></tr>' + (plat || empty(8)) + '</table>' +
   '<h2>Pedejas 14 dienas</h2>' +
   '<table><tr><th>Diena</th><th>Platforma</th><th>PV</th><th>ORD</th><th>REV</th></tr>' + (days || empty(5)) + '</table>' +
   '<h2>Izmainas un spriedumi</h2>' +
@@ -55,6 +55,15 @@ return '<!doctype html><meta charset="utf-8"><title>EWART WOODS - dati</title>' 
 function ok(req, url) {
   const given = url.searchParams.get('token') || req.headers['x-admin-token'] || '';
   return Boolean(ADMIN) && given === ADMIN;
+}
+
+// /ingest pienem ari servisa tokenu, lai datus varetu iestumt, neatdodot ADMIN_TOKEN.
+async function okIngest(req, url) {
+  const given = url.searchParams.get('token') || req.headers['x-admin-token'] || '';
+  if (!given) return false;
+  if (ADMIN && given === ADMIN) return true;
+  const t = await cfgGet('ingest_token');
+  return Boolean(t) && given === t;
 }
 
 function start(port) {
@@ -84,7 +93,7 @@ function start(port) {
 
     // Datiem, ko Railway pats nevar dabut (piem. Amazon caur Seller Labs).
     if (url.pathname === '/ingest' && req.method === 'POST') {
-      if (!ok(req, url)) return send(403, 'text/plain', 'nav atlaujas');
+      if (!(await okIngest(req, url))) return send(403, 'text/plain', 'nav atlaujas');
       const chunks = [];
       for await (const c of req) chunks.push(c);
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
