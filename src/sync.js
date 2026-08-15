@@ -103,7 +103,8 @@ async function syncGoogle(dateIso) {
   const res = await pool.query("SELECT ext_id, extra->>'handle' AS handle FROM items WHERE platform = 'shopify'");
   const byHandle = new Map(res.rows.filter((r) => r.handle).map((r) => [String(r.handle).toLowerCase(), String(r.ext_id)]));
 
-const gscRows = await google.gsc(dateIso);
+const gscDate = addDays(dateIso, -3);
+  const gscRows = await google.gsc(gscDate);
   const ga4Rows = await google.ga4(dateIso);
 
 const gmet = gscRows.map((r) => {
@@ -112,7 +113,7 @@ const gmet = gscRows.map((r) => {
   const path = String(r.page).replace(/^https?:\/\/[^/]+/, '') || '/';
   return { ext_id: pid || ('page:' + path), pv_d: r.clicks, clicks: r.clicks, impr: r.impressions, src: 'gsc' };
 });
-  if (gmet.length) await store.saveMetrics('google', dateIso, gmet);
+  if (gmet.length) await store.saveMetrics('google', gscDate, gmet);
 
 const smet = [];
   for (const r of ga4Rows) {
