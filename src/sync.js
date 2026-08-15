@@ -3,6 +3,7 @@ const store = require('./store');
 const etsy = require('./etsy');
 const shopify = require('./shopify');
 const google = require('./google');
+const meta = require('./meta');
 
 const TZ = process.env.TZ_NAME || 'Europe/Riga';
 const ETSY_STATES = ['active', 'inactive', 'draft', 'sold_out', 'expired'];
@@ -140,6 +141,7 @@ async function runDaily(dateIso) {
 const jobs = [['etsy', syncEtsy]];
   if (shopify.enabled()) jobs.push(['shopify', syncShopify]);
   if (google.enabled()) jobs.push(['google', syncGoogle]);
+  if (meta.enabled()) jobs.push(['meta', (d) => meta.run(d, store)]);
 
 const done = [], failed = [];
   for (const [name, fn] of jobs) {
