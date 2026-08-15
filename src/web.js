@@ -104,6 +104,7 @@ function start(port) {
       if (Array.isArray(body.metrics) && body.metrics.length) {
         Object.assign(out, await store.saveMetrics(platform, date, body.metrics, Boolean(body.cumulativeViews)));
       }
+      if (typeof body.mcsv === 'string' && body.mcsv.length) Object.assign(out, await store.saveMetrics(platform, date, body.mcsv.split(';').filter(Boolean).map((s) => { const p = s.split('|'); return { ext_id: p[0], date: p[1], pv_d: p[2] === '' ? null : Number(p[2]), ord: p[3] === '' ? null : Number(p[3]), rev: p[4] === '' ? null : Number(p[4]), spend: p[5] ? Number(p[5]) : null, clicks: p[6] ? Number(p[6]) : null, impr: p[7] ? Number(p[7]) : null, src: 'sl' }; })));
       if (Array.isArray(body.changes)) {
         for (const c of body.changes) {
           await pool.query("INSERT INTO chlog (date, platform, ext_id, lauks, tips, vecais, jaunais, apraksts, avots, statuss, url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'manual','gaida',$9)", [date, platform, String(c.ext_id), c.lauks || null, c.tips || null, c.vecais || null, c.jaunais || null, c.apraksts || null, c.url || null]);
