@@ -3,6 +3,7 @@ const { pool, cfgGet } = require('./db');
 const sync = require('./sync');
 const analyze = require('./analyze');
 const store = require('./store');
+const fx = require('./fx');
 
 const ADMIN = process.env.ADMIN_TOKEN || '';
 
@@ -113,6 +114,7 @@ function start(port) {
       }
       return send(200, 'application/json', JSON.stringify(out, null, 2));
     }
+      if (url.pathname === '/api/fx') return send(200, 'application/json', JSON.stringify(await fx.monthly(url.searchParams.get('from') || '2024-01-01', url.searchParams.get('to') || '2030-01-01')));
 
     return send(200, 'text/html', page(await summary()));
     } catch (e) {
