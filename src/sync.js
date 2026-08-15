@@ -1,4 +1,5 @@
 const { pool, cfgSet } = require('./db');
+const fx = require('./fx');
 const store = require('./store');
 const etsy = require('./etsy');
 const shopify = require('./shopify');
@@ -142,6 +143,7 @@ const jobs = [['etsy', syncEtsy]];
   if (shopify.enabled()) jobs.push(['shopify', syncShopify]);
   if (google.enabled()) jobs.push(['google', syncGoogle]);
   if (meta.enabled()) jobs.push(['meta', (d) => meta.run(d, store)]);
+  jobs.push(['fx', async () => { const r = await fx.refresh(); return { platform: 'fx', items: r.rindas, changes: 0, orders: 0, revenue: 0 }; }]);
 
 const done = [], failed = [];
   for (const [name, fn] of jobs) {
