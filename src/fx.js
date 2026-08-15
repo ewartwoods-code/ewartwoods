@@ -14,16 +14,19 @@ PRIMARY KEY (date, ccy)
 CREATE INDEX IF NOT EXISTS fx_ccy_idx ON fx (ccy, date);
 `;
 
+// Iet cauri visiem <Cube> tagiem sec1ba. Dienas tags uzstada datumu, valutas tags pieliek kursu.
 function parse(xml) {
   const out = [];
-  const bloki = String(xml).split('<Cube time=');
-  for (let i = 1; i < bloki.length; i++) {
-    const b = bloki[i];
-    const date = b.slice(1, 11);
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
-    const re = /currency='([A-Z]{3})'\s+rate='([0-9.]+)'/g;
-    let m;
-    while ((m = re.exec(b)) !== null) out.push({ date, ccy: m[1], rate: Number(m[2]) });
+  let cur = null;
+  const re = /<Cube([^>]*?)\/?>/g;
+  let m;
+  while ((m = re.exec(String(xml))) !== null) {
+    const a = m[1];
+    const t = a.match(/time=['"]([0-9]{4}-[0-9]{2}-[0-9]{2})['"]/);
+    if (t) { cur = t[1]; continue; }
+    const c = a.match(/currency=['"]([A-Z]{3})['"]/);
+    const r = a.match(/rate=['"]([0-9.]+)['"]/);
+    if (cur && c && r) out.push({ date: cur, ccy: c[1], rate: Number(r[1]) });
   }
   return out;
 }
@@ -34,7 +37,8 @@ async function refresh(full) {
   const pilns = full || have.rows[0].n === 0;
   const res = await fetch(pilns ? URLALL : URL90);
   if (!res.ok) throw new Error('ECB ' + res.status);
-  const rows = parse(await res.text());
+  const teksts = await res.text();
+  const rows = parse(teksts);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -49,7 +53,7 @@ async function refresh(full) {
   } finally {
     client.release();
   }
-  return { pilns: Boolean(pilns), rindas: rows.length };
+  return { pilns: Boolean(pilns), rindas: rows.length, baiti: teksts.length };
 }
 
 // Menesa videjais kurss katrai valutai.
