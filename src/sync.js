@@ -1,13 +1,11 @@
-const crypto = require('crypto');
 const { pool, cfgSet } = require('./db');
+const store = require('./store');
 const etsy = require('./etsy');
+const shopify = require('./shopify');
 
 const TZ = process.env.TZ_NAME || 'Europe/Riga';
+const ETSY_STATES = ['active', 'inactive', 'draft', 'sold_out', 'expired'];
 
-// Visi stavokli, ne tikai active. Listinga izslegsana ir tikpat svariga izmaina.
-const LISTING_STATES = ['active', 'inactive', 'draft', 'sold_out', 'expired'];
-
-// YYYY-MM-DD konkreta laika josla
 function dayStr(d = new Date(), offsetDays = 0) {
   const t = new Date(d.getTime() + offsetDays * 86400000);
   return new Intl.DateTimeFormat('en-CA', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(t);
@@ -19,7 +17,6 @@ function addDays(iso, n) {
   return d.toISOString().slice(0, 10);
 }
 
-// Dienas robezas unix sekundes, TZ nobidi nemot no pasas dienas
 function dayBounds(iso) {
   const probe = new Date(iso + 'T12:00:00Z');
   const local = new Date(probe.toLocaleString('en-US', { timeZone: TZ }));
@@ -29,22 +26,23 @@ function dayBounds(iso) {
   return { from: Math.floor(start / 1000), to: Math.floor(start / 1000) + 86399 };
 }
 
-const hash = (s) => crypto.createHash('sha256').update(String(s || '')).digest('base64url').slice(0, 16);
-
-function shapeListing(l) {
+// ETSY
+function shapeEtsy(l) {
   const p = l.price || {};
   const imgs = (l.images || []).map((i) => i.listing_image_id).join(',');
   return {
-    lid: Number(l.listing_id),
-    url: l.url || `https://www.etsy.com/listing/${l.listing_id}`,
+    ext_id: String(l.listing_id),
+    url: l.url || 'https://www.etsy.com/listing/' + l.listing_id,
     title: l.title || '',
     sku: (l.skus || []).join(','),
     st8: l.state || '',
     price: p.amount != null && p.divisor ? Number(p.amount) / Number(p.divisor) : null,
     ccy: p.currency_code || null,
     tags: (l.tags || []).join(', '),
-    img: hash(imgs),
-    desc_h: hash(l.description),
+    img: store.hash(imgs),
+    desc_h: store.hash(l.description),
+    seo_h: null,
+    extra: { materials: l.materials || [], quantity: l.quantity == null ? null : l.quantity },
     lastmod: Number(l.last_modified_timestamp || 0),
     created: Number(l.original_creation_timestamp || 0),
     pv_tot: l.views == null ? null : Number(l.views),
@@ -52,124 +50,79 @@ function shapeListing(l) {
   };
 }
 
-// Kas mainijies pret vakardienas stavokli. Viena rinda uz listingu diena.
-const FIELDS = [
-  ['title', 'TITLE', 'Nosaukums'],
-  ['tags', 'TAGS', 'Tagi'],
-  ['price', 'PRICE', 'Cena'],
-  ['img', 'IMG', 'Bildes'],
-  ['desc_h', 'DESC_H', 'Apraksts'],
-  ['st8', 'ST8', 'Statuss']
-  ];
-
-function diff(prev, next) {
-  if (!prev) return null;
-  const tips = [], lauks = [], vecais = [], jaunais = [];
-  for (const [key, code, human] of FIELDS) {
-    const a = prev[key] == null ? '' : String(prev[key]);
-    const b = next[key] == null ? '' : String(next[key]);
-    if (a === b) continue;
-    tips.push(code);
-    lauks.push(human);
-    vecais.push(`${code}: ${a.slice(0, 120)}`);
-    jaunais.push(`${code}: ${b.slice(0, 120)}`);
-  }
-  if (!tips.length) return null;
-  return { tips: tips.join(','), lauks: lauks.join(', '), vecais: vecais.join(' | '), jaunais: jaunais.join(' | ') };
-}
-
-async function fetchAllListings(shop) {
+async function etsyListings(shop) {
   const seen = new Map();
-  for (const st of LISTING_STATES) {
-    const rows = await etsy.all(`/shops/${shop}/listings`, { state: st, includes: 'Images' });
-    for (const l of rows) seen.set(Number(l.listing_id), l);
+  for (const st of ETSY_STATES) {
+    const rows = await etsy.all('/shops/' + shop + '/listings', { state: st, includes: 'Images' });
+    for (const l of rows) seen.set(String(l.listing_id), l);
   }
-  return [...seen.values()];
+  return [...seen.values()].map(shapeEtsy);
 }
 
-async function syncListings(dateIso) {
+async function syncEtsy(dateIso) {
   const shop = await etsy.shopId();
-  const rows = (await fetchAllListings(shop)).map(shapeListing);
+  const rows = await etsyListings(shop);
+  const a = await store.saveItems('etsy', dateIso, rows);
+  await store.saveMetrics('etsy', dateIso, rows.map((r) => ({ ext_id: r.ext_id, pv_tot: r.pv_tot, fav: r.fav, ccy: r.ccy })), true);
 
-const prevRes = await pool.query('SELECT * FROM listings');
-  const prev = new Map(prevRes.rows.map((r) => [Number(r.lid), r]));
-  const prevDay = addDays(dateIso, -1);
-  const pvRes = await pool.query('SELECT lid, pv_tot FROM snap_d WHERE date = $1', [prevDay]);
-  const pvPrev = new Map(pvRes.rows.map((r) => [Number(r.lid), r.pv_tot]));
-
-let changes = 0;
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    for (const r of rows) {
-      const before = prev.get(r.lid);
-      const d = diff(before, r);
-      if (d) {
-        changes++;
-        await client.query('INSERT INTO chlog (date, lid, tips, lauks, vecais, jaunais, avots, statuss, url) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [dateIso, r.lid, d.tips, d.lauks, d.vecais, d.jaunais, 'auto', 'gaida', r.url]);
-      }
-      await client.query('INSERT INTO listings (lid,url,title,sku,st8,price,ccy,tags,img,desc_h,lastmod,created,last_seen) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) ON CONFLICT (lid) DO UPDATE SET url=EXCLUDED.url, title=EXCLUDED.title, sku=EXCLUDED.sku, st8=EXCLUDED.st8, price=EXCLUDED.price, ccy=EXCLUDED.ccy, tags=EXCLUDED.tags, img=EXCLUDED.img, desc_h=EXCLUDED.desc_h, lastmod=EXCLUDED.lastmod, created=EXCLUDED.created, last_seen=EXCLUDED.last_seen', [r.lid, r.url, r.title, r.sku, r.st8, r.price, r.ccy, r.tags, r.img, r.desc_h, r.lastmod, r.created, dateIso]);
-
-    const pvYesterday = pvPrev.get(r.lid);
-      const pvD = r.pv_tot != null && pvYesterday != null ? r.pv_tot - Number(pvYesterday) : null;
-      await client.query('INSERT INTO snap_d (date, lid, pv_tot, pv_d, fav, ccy) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (date, lid) DO UPDATE SET pv_tot=EXCLUDED.pv_tot, pv_d=EXCLUDED.pv_d, fav=EXCLUDED.fav', [dateIso, r.lid, r.pv_tot, pvD, r.fav, r.ccy]);
-    }
-    await client.query('COMMIT');
-  } catch (e) {
-    await client.query('ROLLBACK');
-    throw e;
-  } finally {
-    client.release();
-  }
-  return { listings: rows.length, changes };
-}
-
-async function syncReceipts(dateIso) {
-  const shop = await etsy.shopId();
-  const { from, to } = dayBounds(dateIso);
-  const receipts = await etsy.all(`/shops/${shop}/receipts`, { min_created: from, max_created: to });
-
-const agg = new Map();
+const { from, to } = dayBounds(dateIso);
+  const receipts = await etsy.all('/shops/' + shop + '/receipts', { min_created: from, max_created: to });
+  const agg = new Map();
   for (const rc of receipts) {
     for (const t of rc.transactions || []) {
-      const lid = Number(t.listing_id);
-      if (!lid) continue;
+      const id = String(t.listing_id || '');
+      if (!id || id === 'null') continue;
       const p = t.price || {};
       const unit = p.amount != null && p.divisor ? Number(p.amount) / Number(p.divisor) : 0;
       const qty = Number(t.quantity || 0);
-      const cur = agg.get(lid) || { ord: 0, rev: 0, ccy: p.currency_code || null };
+      const cur = agg.get(id) || { ext_id: id, ord: 0, rev: 0, ccy: p.currency_code || null };
       cur.ord += qty;
       cur.rev += unit * qty;
-      agg.set(lid, cur);
+      agg.set(id, cur);
     }
   }
+  const sales = [...agg.values()].map((v) => ({ ...v, rev: Number(v.rev.toFixed(2)) }));
+  await store.saveMetrics('etsy', dateIso, sales);
 
-for (const [lid, v] of agg) {
-  await pool.query('INSERT INTO snap_d (date, lid, ord, rev, ccy) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (date, lid) DO UPDATE SET ord=EXCLUDED.ord, rev=EXCLUDED.rev, ccy=COALESCE(snap_d.ccy, EXCLUDED.ccy)', [dateIso, lid, v.ord, v.rev.toFixed(2), v.ccy]);
-}
-  const orders = [...agg.values()].reduce((s, v) => s + v.ord, 0);
-  const revenue = [...agg.values()].reduce((s, v) => s + v.rev, 0);
-  return { receipts: receipts.length, orders, revenue: Number(revenue.toFixed(2)) };
+return { platform: 'etsy', items: a.items, changes: a.changes, orders: sales.reduce((s, v) => s + v.ord, 0), revenue: Number(sales.reduce((s, v) => s + v.rev, 0).toFixed(2)) };
 }
 
+// SHOPIFY
+async function syncShopify(dateIso) {
+  const rows = await shopify.products();
+  const a = await store.saveItems('shopify', dateIso, rows);
+  const { list } = await shopify.dayOrders(dateIso);
+  await store.saveMetrics('shopify', dateIso, list);
+  return { platform: 'shopify', items: a.items, changes: a.changes, orders: list.reduce((s, v) => s + v.ord, 0), revenue: Number(list.reduce((s, v) => s + v.rev, 0).toFixed(2)) };
+}
+
+// ORKESTRATORS
 async function runDaily(dateIso) {
   const date = dateIso || dayStr(new Date(), -1);
   const run = await pool.query('INSERT INTO runs DEFAULT VALUES RETURNING id');
   const runId = run.rows[0].id;
-  try {
-    const a = await syncListings(date);
-    const b = await syncReceipts(date);
-    const summary = `${date}: ${a.listings} listingi, ${a.changes} izmainas, ${b.receipts} rekini, ${b.orders} vienibas, ${b.revenue}`;
-    await pool.query('UPDATE runs SET ended = now(), ok = true, summary = $2 WHERE id = $1', [runId, summary]);
-    await cfgSet('pedeja_darbiba', summary);
-    await cfgSet('pedeja_diena', date);
-    return { ok: true, date, ...a, ...b, summary };
-  } catch (e) {
-    const msg = String(e.message || e).slice(0, 500);
-    await pool.query('UPDATE runs SET ended = now(), ok = false, summary = $2 WHERE id = $1', [runId, msg]);
-    await cfgSet('pedeja_darbiba', `KLUDA ${date}: ${msg}`);
-    throw e;
+
+const jobs = [['etsy', syncEtsy]];
+  if (shopify.enabled()) jobs.push(['shopify', syncShopify]);
+
+const done = [], failed = [];
+  for (const [name, fn] of jobs) {
+    try {
+      done.push(await fn(date));
+    } catch (e) {
+      failed.push(name + ': ' + String(e.message || e).slice(0, 200));
+    }
   }
+
+const parts = done.map((r) => r.platform + ' ' + r.items + ' preces, ' + r.changes + ' izmainas, ' + r.orders + ' vien., ' + r.revenue);
+  const summary = date + ' | ' + (parts.join(' | ') || 'nekas nesanaca') + (failed.length ? ' | KLUDAS: ' + failed.join('; ') : '');
+
+await pool.query('UPDATE runs SET ended = now(), ok = $2, summary = $3 WHERE id = $1', [runId, done.length > 0, summary]);
+  await cfgSet('pedeja_darbiba', summary);
+  if (done.length) await cfgSet('pedeja_diena', date);
+  if (!done.length) throw new Error(summary);
+
+return { ok: true, date, platformas: done, kludas: failed, summary };
 }
 
-module.exports = { runDaily, syncListings, syncReceipts, dayStr, addDays };
+module.exports = { runDaily, syncEtsy, syncShopify, dayStr, addDays };
