@@ -11,9 +11,10 @@ const TITLE = process.env.OPENROUTER_TITLE || 'EWART WOODS dati';
 
 const enabled = () => Boolean(KEY);
 
-function headers() {
+// key: agenta sava atslega, ja tada ir; citadi konta kopeja no ENV.
+function headers(key) {
   return {
-    Authorization: 'Bearer ' + KEY,
+    Authorization: 'Bearer ' + (key || KEY),
     'Content-Type': 'application/json',
     // OpenRouter tos izmanto statistikai savas lapas rangos; nav obligati.
     'HTTP-Referer': REFERER,
@@ -22,13 +23,13 @@ function headers() {
 }
 
 // Iekseja palidzfunkcija: viens pieprasijums ar taimautu un cilveciskam kludam.
-async function call(path, init) {
-  if (!enabled()) throw new Error('nav OPENROUTER_API_KEY');
+async function call(path, init, key) {
+  if (!key && !enabled()) throw new Error('nav OPENROUTER_API_KEY');
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), TIMEOUT);
   let r;
   try {
-    r = await fetch(BASE + path, { ...init, headers: headers(), signal: ctrl.signal });
+    r = await fetch(BASE + path, { ...init, headers: headers(key), signal: ctrl.signal });
   } catch (e) {
     clearTimeout(t);
     throw new Error(e.name === 'AbortError' ? 'OpenRouter taimauts (' + TIMEOUT + 'ms)' : 'OpenRouter nesasniedzams: ' + e.message);
@@ -59,8 +60,9 @@ async function chat(messages, opts = {}) {
   if (opts.maxTokens != null) body.max_tokens = Number(opts.maxTokens);
   if (opts.temperature != null) body.temperature = Number(opts.temperature);
   if (opts.json) body.response_format = { type: 'json_object' };
+  if (opts.lētākais || opts.cheapest) body.provider = { sort: 'price' };
 
-  const data = await call('/chat/completions', { method: 'POST', body: JSON.stringify(body) });
+  const data = await call('/chat/completions', { method: 'POST', body: JSON.stringify(body) }, opts.apiKey);
   const choice = (data && data.choices && data.choices[0]) || {};
   return {
     teksts: (choice.message && choice.message.content) || '',

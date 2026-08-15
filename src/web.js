@@ -5,6 +5,7 @@ const analyze = require('./analyze');
 const store = require('./store');
 const fx = require('./fx');
 const ai = require('./ai');
+const agents = require('./agents');
 
 const ADMIN = process.env.ADMIN_TOKEN || '';
 
@@ -18,7 +19,11 @@ const days = await pool.query('SELECT date, platform, SUM(COALESCE(pv_d,0))::int
 
 const changes = await pool.query('SELECT c.id, c.date, c.platform, c.ext_id, c.lauks, c.statuss, c.spriedums, c.url, i.title FROM chlog c LEFT JOIN items i ON i.platform = c.platform AND i.ext_id = c.ext_id ORDER BY c.date DESC, c.id DESC LIMIT 40');
 
-return { pedeja_darbiba: last, pedeja_diena: day, platformas: perPlatform.rows, dienas: days.rows, izmainas: changes.rows };
+// AI terins nedrikst nogazt paneli, ja tabulu vel nav.
+let ai_agenti = [];
+try { ai_agenti = await agents.usage(); } catch (_) {}
+
+return { pedeja_darbiba: last, pedeja_diena: day, platformas: perPlatform.rows, dienas: days.rows, izmainas: changes.rows, ai_agenti };
 }
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -41,6 +46,11 @@ const chg = d.izmainas.map((r) => {
 
 const empty = (n) => '<tr><td colspan=' + n + ' class=note>nav datu</td></tr>';
 
+const usd = (v) => '$' + Number(v || 0).toFixed(4);
+const agn = d.ai_agenti || [];
+const ai_rows = agn.map((r) => '<tr><td>' + esc(r.agents) + '</td><td>' + esc(r.izsaukumi) + '</td><td>' + esc(r.kludas) + '</td><td>' + esc(r.tokeni) + '</td><td>' + usd(r.cost_sodien) + '</td><td>' + usd(r.cost) + '</td></tr>').join('') +
+  (agn.length ? '<tr><td><b>KOPA</b></td><td></td><td></td><td></td><td><b>' + usd(agn.reduce((a, r) => a + Number(r.cost_sodien || 0), 0)) + '</b></td><td><b>' + usd(agn.reduce((a, r) => a + Number(r.cost || 0), 0)) + '</b></td></tr>' : '');
+
 return '<!doctype html><meta charset="utf-8"><title>EWART WOODS - dati</title>' +
   '<meta name="viewport" content="width=device-width,initial-scale=1">' +
   '<style>' + CSS + '</style>' +
@@ -51,7 +61,9 @@ return '<!doctype html><meta charset="utf-8"><title>EWART WOODS - dati</title>' 
   '<h2>Pedejas 14 dienas</h2>' +
   '<table><tr><th>Diena</th><th>Platforma</th><th>PV</th><th>ORD</th><th>REV</th></tr>' + (days || empty(5)) + '</table>' +
   '<h2>Izmainas un spriedumi</h2>' +
-  '<table class="chg"><tr><th>Diena</th><th>Platforma</th><th>Prece</th><th>Lauks</th><th>Spriedums</th></tr>' + (chg || empty(5)) + '</table>';
+  '<table class="chg"><tr><th>Diena</th><th>Platforma</th><th>Prece</th><th>Lauks</th><th>Spriedums</th></tr>' + (chg || empty(5)) + '</table>' +
+  '<h2>AI agenti (30 dienas)</h2>' +
+  '<table><tr><th>Agents</th><th>Izsaukumi</th><th>Kludas</th><th>Tokeni</th><th>Sodien</th><th>30 dienas</th></tr>' + (ai_rows || empty(6)) + '</table>';
 }
 
 // Pienem gan ADMIN_TOKEN, gan servisa ingest_token.
@@ -138,6 +150,48 @@ function start(port) {
           maxTokens: b.maxTokens || url.searchParams.get('maxTokens') || undefined,
         });
         return send(200, 'application/json', JSON.stringify(out, null, 2));
+      }
+
+      // Agentu saraksts ar teerinu, un izveide/atjaunosana.
+      // POST /agents {"vards":"seo","modelis":"...","sys":"...","budzets":5,"periods":"monthly","provision":true}
+      if (url.pathname === '/agents') {
+        if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas');
+        if (req.method === 'POST') {
+          const chunks = [];
+          for await (const c of req) chunks.push(c);
+          const b = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+          return send(200, 'application/json', JSON.stringify(await agents.save(b), null, 2));
+        }
+        return send(200, 'application/json', JSON.stringify(await agents.list(), null, 2));
+      }
+
+      if (url.pathname === '/agents/usage') {
+        if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas');
+        return send(200, 'application/json', JSON.stringify(await agents.usage(), null, 2));
+      }
+
+      // Agenta palaisana: /agent/<vards>?q=...  vai DELETE tam pasam celam.
+      if (url.pathname.startsWith('/agent/')) {
+        if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas');
+        const vards = decodeURIComponent(url.pathname.slice('/agent/'.length));
+        if (req.method === 'DELETE') {
+          return send(200, 'application/json', JSON.stringify(await agents.remove(vards), null, 2));
+        }
+        let b = {};
+        if (req.method === 'POST') {
+          const chunks = [];
+          for await (const c of req) chunks.push(c);
+          b = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+        }
+        const q = String(b.q || url.searchParams.get('q') || '').trim();
+        if (!q) return send(400, 'text/plain', 'vajag q');
+        try {
+          const out = await agents.run(vards, q, { model: b.model || undefined, maxTokens: b.maxTokens || undefined });
+          return send(200, 'application/json', JSON.stringify(out, null, 2));
+        } catch (e) {
+          // Budzeta pieturu atdodam ka 429, lai izsaucejs to atskir no istas kludas.
+          return send(e.budzets ? 429 : 500, 'application/json', JSON.stringify({ kluda: String(e.message) }, null, 2));
+        }
       }
 
       if (url.pathname === '/api/fx') return send(200, 'application/json', JSON.stringify(await fx.monthly(url.searchParams.get('from') || '2024-01-01', url.searchParams.get('to') || '2030-01-01')));
