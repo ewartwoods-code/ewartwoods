@@ -68,6 +68,7 @@ pvPrev = new Map(r.rows.map((x) => [String(x.ext_id), x.pv_tot]));
 }
 
 for (const m of list) {
+  if (m.date) dateIso = m.date;
 const id = String(m.ext_id);
 const y = pvPrev.get(id);
 const pvD = m.pv_d != null ? m.pv_d : (cumulativeViews && m.pv_tot != null && y != null ? m.pv_tot - Number(y) : null);
