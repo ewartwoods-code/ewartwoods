@@ -65,8 +65,7 @@ async function syncEtsy(dateIso) {
   const rows = await etsyListings(shop);
   const a = await store.saveItems('etsy', dateIso, rows);
   await store.saveMetrics('etsy', dateIso, rows.map((r) => ({ ext_id: r.ext_id, pv_tot: r.pv_tot, fav: r.fav, ccy: r.ccy })), true);
-
-const { from, to } = dayBounds(dateIso);
+  const { from, to } = dayBounds(dateIso);
   const receipts = await etsy.all('/shops/' + shop + '/receipts', { min_created: from, max_created: to });
   const agg = new Map();
   for (const rc of receipts) {
@@ -84,8 +83,7 @@ const { from, to } = dayBounds(dateIso);
   }
   const sales = [...agg.values()].map((v) => ({ ...v, rev: Number(v.rev.toFixed(2)) }));
   await store.saveMetrics('etsy', dateIso, sales);
-
-return { platform: 'etsy', items: a.items, changes: a.changes, orders: sales.reduce((s, v) => s + v.ord, 0), revenue: Number(sales.reduce((s, v) => s + v.rev, 0).toFixed(2)) };
+  return { platform: 'etsy', items: a.items, changes: a.changes, orders: sales.reduce((s, v) => s + v.ord, 0), revenue: Number(sales.reduce((s, v) => s + v.rev, 0).toFixed(2)) };
 }
 
 // SHOPIFY
@@ -97,7 +95,7 @@ async function syncShopify(dateIso) {
   return { platform: 'shopify', items: a.items, changes: a.changes, orders: list.reduce((s, v) => s + v.ord, 0), revenue: Number(list.reduce((s, v) => s + v.rev, 0).toFixed(2)) };
 }
 
-// GOOGLE: Search Console lapu dati un GA4 sesijas.
+// GOOGLE: Search Console lapas, GA4 sesijas, Google Ads izmaksas, Merchant Center preces.
 // GA4 sesijas rakstam Shopify precem, jo Shopify pats skatijumus nedod.
 async function syncGoogle(dateIso) {
   const res = await pool.query("SELECT ext_id, extra->>'handle' AS handle FROM items WHERE platform = 'shopify'");
@@ -122,7 +120,15 @@ const smet = [];
   }
   if (smet.length) await store.saveMetrics('shopify', dateIso, smet);
 
-return { platform: 'google', items: gmet.length, changes: 0, orders: 0, revenue: 0, ga4_lapas: smet.length };
+const ads = await google.ga4Ads(dateIso).catch(() => []);
+  const amet = ads.map((r) => ({ ext_id: r.campaign, pv_d: r.sessions, clicks: r.clicks, impr: r.impr, spend: r.cost, src: 'ga4ads' }));
+  if (amet.length) await store.saveMetrics('googleads', dateIso, amet);
+
+const mcr = await google.mc(dateIso).catch(() => []);
+  const mmet = mcr.map((r) => ({ ext_id: r.ext_id, pv_d: r.clicks, clicks: r.clicks, impr: r.impr, ord: r.ord, rev: r.rev, src: 'merchant' }));
+  if (mmet.length) await store.saveMetrics('merchant', dateIso, mmet);
+
+return { platform: 'google', items: gmet.length, changes: 0, orders: 0, revenue: 0, ga4_lapas: smet.length, ads: amet.length, merchant: mmet.length };
 }
 
 // ORKESTRATORS
