@@ -4,6 +4,7 @@ const sync = require('./sync');
 const analyze = require('./analyze');
 const store = require('./store');
 const fx = require('./fx');
+const ai = require('./ai');
 
 const ADMIN = process.env.ADMIN_TOKEN || '';
 
@@ -114,6 +115,31 @@ function start(port) {
       }
       return send(200, 'application/json', JSON.stringify(out, null, 2));
     }
+      // OpenRouter parbaude: vai atslega deriga, kads modelis, cik kredita.
+      if (url.pathname === '/ai/status') {
+        if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas');
+        return send(200, 'application/json', JSON.stringify(await ai.status(), null, 2));
+      }
+
+      // Viens jautajums modelim. GET: /ai?q=...  POST: {"q":"...","system":"...","model":"..."}
+      if (url.pathname === '/ai') {
+        if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas');
+        let b = {};
+        if (req.method === 'POST') {
+          const chunks = [];
+          for await (const c of req) chunks.push(c);
+          b = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+        }
+        const q = String(b.q || url.searchParams.get('q') || '').trim();
+        if (!q) return send(400, 'text/plain', 'vajag q');
+        const out = await ai.chat(q, {
+          system: b.system || url.searchParams.get('system') || undefined,
+          model: b.model || url.searchParams.get('model') || undefined,
+          maxTokens: b.maxTokens || url.searchParams.get('maxTokens') || undefined,
+        });
+        return send(200, 'application/json', JSON.stringify(out, null, 2));
+      }
+
       if (url.pathname === '/api/fx') return send(200, 'application/json', JSON.stringify(await fx.monthly(url.searchParams.get('from') || '2024-01-01', url.searchParams.get('to') || '2030-01-01')));
       if (url.pathname === '/fx') { if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas'); return send(200, 'application/json', JSON.stringify(await fx.refresh(url.searchParams.get('full') === '1'))); }
       if (url.pathname === '/mcreg') { if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas'); const g = require('./google'); const t = await g.token('https://www.googleapis.com/auth/content'); const out = []; for (const a of ['5802772116', '191177237', '5802814146']) { const rr = await fetch('https://merchantapi.googleapis.com/accounts/v1/accounts/' + a + '/developerRegistration:registerGcp', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + t }, body: JSON.stringify({ developerEmail: url.searchParams.get('email') || '' }) }); out.push({ konts: a, st: rr.status, atbilde: (await rr.text()).slice(0, 250) }); } return send(200, 'application/json', JSON.stringify(out, null, 2)); }
