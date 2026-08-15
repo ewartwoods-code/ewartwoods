@@ -96,6 +96,8 @@ const it = await pool.query('SELECT created FROM items WHERE platform = $1 AND e
     }
   }
   if (touchesSeason(preFrom, postTo)) warn.push('sezona: logs skar svetku periodu');
+  const oq = await pool.query('SELECT COUNT(*)::int AS n FROM metrics WHERE platform = $1 AND ext_id = $2 AND oos = true AND date BETWEEN $3 AND $4', [platform, extId, preFrom, postTo]);
+  if (oq.rows[0].n > 0) warn.push('bez atlikuma: ' + oq.rows[0].n + ' dienas loga prece nebija nopérkama');
 
 const cvrPre = s.pv_pre ? s.ord_pre / s.pv_pre : 0;
   const cvrPost = s.pv_post ? s.ord_post / s.pv_post : 0;
