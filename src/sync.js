@@ -2,6 +2,7 @@ const { pool, cfgSet } = require('./db');
 const store = require('./store');
 const etsy = require('./etsy');
 const shopify = require('./shopify');
+const google = require('./google');
 
 const TZ = process.env.TZ_NAME || 'Europe/Riga';
 const ETSY_STATES = ['active', 'inactive', 'draft', 'sold_out', 'expired'];
@@ -96,6 +97,34 @@ async function syncShopify(dateIso) {
   return { platform: 'shopify', items: a.items, changes: a.changes, orders: list.reduce((s, v) => s + v.ord, 0), revenue: Number(list.reduce((s, v) => s + v.rev, 0).toFixed(2)) };
 }
 
+// GOOGLE: Search Console lapu dati un GA4 sesijas.
+// GA4 sesijas rakstam Shopify precem, jo Shopify pats skatijumus nedod.
+async function syncGoogle(dateIso) {
+  const res = await pool.query("SELECT ext_id, extra->>'handle' AS handle FROM items WHERE platform = 'shopify'");
+  const byHandle = new Map(res.rows.filter((r) => r.handle).map((r) => [String(r.handle).toLowerCase(), String(r.ext_id)]));
+
+const gscRows = await google.gsc(dateIso);
+  const ga4Rows = await google.ga4(dateIso);
+
+const gmet = gscRows.map((r) => {
+  const h = google.handleOf(r.page);
+  const pid = h ? byHandle.get(h) : null;
+  const path = String(r.page).replace(/^https?:\/\/[^/]+/, '') || '/';
+  return { ext_id: pid || ('page:' + path), pv_d: r.clicks, clicks: r.clicks, impr: r.impressions, src: 'gsc' };
+});
+  if (gmet.length) await store.saveMetrics('google', dateIso, gmet);
+
+const smet = [];
+  for (const r of ga4Rows) {
+    const h = google.handleOf(r.path);
+    const pid = h ? byHandle.get(h) : null;
+    if (pid) smet.push({ ext_id: pid, pv_d: r.sessions, src: 'ga4' });
+  }
+  if (smet.length) await store.saveMetrics('shopify', dateIso, smet);
+
+return { platform: 'google', items: gmet.length, changes: 0, orders: 0, revenue: 0, ga4_lapas: smet.length };
+}
+
 // ORKESTRATORS
 async function runDaily(dateIso) {
   const date = dateIso || dayStr(new Date(), -1);
@@ -104,6 +133,7 @@ async function runDaily(dateIso) {
 
 const jobs = [['etsy', syncEtsy]];
   if (shopify.enabled()) jobs.push(['shopify', syncShopify]);
+  if (google.enabled()) jobs.push(['google', syncGoogle]);
 
 const done = [], failed = [];
   for (const [name, fn] of jobs) {
@@ -125,4 +155,4 @@ await pool.query('UPDATE runs SET ended = now(), ok = $2, summary = $3 WHERE id 
 return { ok: true, date, platformas: done, kludas: failed, summary };
 }
 
-module.exports = { runDaily, syncEtsy, syncShopify, dayStr, addDays };
+module.exports = { runDaily, syncEtsy, syncShopify, syncGoogle, dayStr, addDays };
