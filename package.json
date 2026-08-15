@@ -1,0 +1,16 @@
+{
+  "name": "ewartwoods-etsy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "EWART WOODS Etsy dienas datu vaceejs",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}
