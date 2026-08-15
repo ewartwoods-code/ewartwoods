@@ -52,13 +52,8 @@ return '<!doctype html><meta charset="utf-8"><title>EWART WOODS - dati</title>' 
   '<table class="chg"><tr><th>Diena</th><th>Platforma</th><th>Prece</th><th>Lauks</th><th>Spriedums</th></tr>' + (chg || empty(5)) + '</table>';
 }
 
-function ok(req, url) {
-  const given = url.searchParams.get('token') || req.headers['x-admin-token'] || '';
-  return Boolean(ADMIN) && given === ADMIN;
-}
-
-// /ingest pienem ari servisa tokenu, lai datus varetu iestumt, neatdodot ADMIN_TOKEN.
-async function okIngest(req, url) {
+// Pienem gan ADMIN_TOKEN, gan servisa ingest_token.
+async function ok(req, url) {
   const given = url.searchParams.get('token') || req.headers['x-admin-token'] || '';
   if (!given) return false;
   if (ADMIN && given === ADMIN) return true;
@@ -81,19 +76,19 @@ function start(port) {
     }
 
     if (url.pathname === '/run') {
-      if (!ok(req, url)) return send(403, 'text/plain', 'nav atlaujas');
+      if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas');
       const out = await sync.runDaily(url.searchParams.get('date') || undefined);
       return send(200, 'application/json', JSON.stringify(out, null, 2));
     }
 
     if (url.pathname === '/analyze') {
-      if (!ok(req, url)) return send(403, 'text/plain', 'nav atlaujas');
+      if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas');
       return send(200, 'application/json', JSON.stringify(await analyze.runAnalysis(), null, 2));
     }
 
     // Datiem, ko Railway pats nevar dabut (piem. Amazon caur Seller Labs).
     if (url.pathname === '/ingest' && req.method === 'POST') {
-      if (!(await okIngest(req, url))) return send(403, 'text/plain', 'nav atlaujas');
+      if (!(await ok(req, url))) return send(403, 'text/plain', 'nav atlaujas');
       const chunks = [];
       for await (const c of req) chunks.push(c);
       const body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
