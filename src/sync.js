@@ -126,7 +126,7 @@ const ads = await google.ga4Ads(dateIso).catch(() => []);
   const amet = ads.map((r) => ({ ext_id: r.campaign, pv_d: r.sessions, clicks: r.clicks, impr: r.impr, spend: r.cost, src: 'ga4ads' }));
   if (amet.length) await store.saveMetrics('googleads', dateIso, amet);
 
-const mcr = await google.mc(dateIso).catch(() => []);
+const mcr = await google.mc(dateIso).catch((e) => { console.error('MERCHANT KLUDA:', String(e.message || e).slice(0, 400)); return []; });
   const mmet = mcr.map((r) => ({ ext_id: r.ext_id, pv_d: r.clicks, clicks: r.clicks, impr: r.impr, ord: r.ord, rev: r.rev, src: 'merchant' }));
   if (mmet.length) await store.saveMetrics('merchant', dateIso, mmet);
 
