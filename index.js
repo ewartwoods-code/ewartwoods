@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const db = require('./src/db');
 const web = require('./src/web');
 const sync = require('./src/sync');
@@ -9,6 +10,18 @@ const TZ = process.env.TZ_NAME || 'Europe/Riga';
 
 function localHour() {
   return Number(new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', hour12: false }).format(new Date()));
+}
+
+// Servisa tokens tikai /ingest galapunktam. Pats sevi izveido un ieraksta zurnala,
+// lai datus varetu iestumt no arpuses, neatdodot ADMIN_TOKEN.
+async function ensureIngestToken() {
+  let t = await db.cfgGet('ingest_token');
+  if (!t) {
+    t = crypto.randomBytes(24).toString('base64url');
+    await db.cfgSet('ingest_token', t);
+  }
+  console.log('ingest_token:', t);
+  return t;
 }
 
 // Ik pa 10 minutem paskatas, vai vakardienas dati jau ir savakti.
@@ -29,6 +42,7 @@ async function tick() {
 
 async function main() {
   await db.init();
+  await ensureIngestToken();
   web.start(PORT);
   try {
     const a = await analyze.runAnalysis(sync.dayStr());
