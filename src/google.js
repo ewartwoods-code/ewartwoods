@@ -100,10 +100,10 @@ async function ga4Ads(dateIso) {
 }
 
 // Merchant Center: preces limena kliksi un raditijumi pa katru sub-kontu.
-const MC_VER = ['v1beta', 'v1'];
+const MC_VER = ['v1'];
 
 async function mcOne(acc, dateIso) {
-  const q = "SELECT offer_id, clicks, impressions, conversions, conversion_value_micros FROM product_performance_view WHERE date BETWEEN '" + dateIso + "' AND '" + dateIso + "'";
+  const q = "SELECT offer_id, date, clicks, impressions, conversions, conversion_value_micros FROM product_performance_view WHERE date BETWEEN '" + dateIso + "' AND '" + dateIso + "'";
   let last = null;
   for (const v of MC_VER) {
     try {
