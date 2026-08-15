@@ -72,6 +72,7 @@ summary text
 );
 ALTER TABLE chlog ADD COLUMN IF NOT EXISTS platform text;
 ALTER TABLE chlog ADD COLUMN IF NOT EXISTS ext_id text;
+ALTER TABLE metrics ADD COLUMN IF NOT EXISTS oos boolean;
 CREATE INDEX IF NOT EXISTS metrics_item_idx ON metrics (platform, ext_id, date);
 CREATE INDEX IF NOT EXISTS chlog_item_idx ON chlog (platform, ext_id, date);
 `;
