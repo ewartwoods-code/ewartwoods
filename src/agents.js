@@ -56,8 +56,8 @@ function windowSql(periods) {
 }
 
 async function spent(vards, periods) {
-  const r = await pool.query('SELECT COALESCE(SUM(cost),0)::numeric AS c, COUNT(*)::int AS n FROM ai_log WHERE agents = $1 AND ok = true AND ' + windowSql(periods), [vards]);
-  return { cost: Number(r.rows[0].c), izsaukumi: r.rows[0].n };
+  const r = await pool.query('SELECT COALESCE(SUM(cost),0)::numeric AS c, COALESCE(SUM(tt),0)::int AS tk, COUNT(*)::int AS n FROM ai_log WHERE agents = $1 AND ok = true AND ' + windowSql(periods), [vards]);
+  return { cost: Number(r.rows[0].c), tokeni: r.rows[0].tk, izsaukumi: r.rows[0].n };
 }
 
 // --- OpenRouter atslegu parvaldiba (nav obligata) -------------------------
@@ -120,6 +120,7 @@ async function list() {
       ...a,
       budzets: a.budzets == null ? null : Number(a.budzets),
       izterets: Number(s.cost.toFixed(6)),
+      tokeni: s.tokeni,
       izsaukumi: s.izsaukumi,
       atlicis: a.budzets == null ? null : Number((Number(a.budzets) - s.cost).toFixed(6)),
       limits: a.sava_atslega ? 'ciets (OpenRouter)' : a.budzets == null ? 'nav' : 'mikstais (kods)',
