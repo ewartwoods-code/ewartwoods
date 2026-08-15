@@ -10,11 +10,7 @@ const S_GSC = 'https://www.googleapis.com/auth/webmasters.readonly';
 const S_GA4 = 'https://www.googleapis.com/auth/analytics.readonly';
 const S_MC = 'https://www.googleapis.com/auth/content';
 
-function creds() {
-  if (!RAW) return null;
-  const txt = RAW.trim().startsWith('{') ? RAW : Buffer.from(RAW, 'base64').toString('utf8');
-  return JSON.parse(txt);
-}
+function creds() { if (!RAW) return null; let t = RAW.trim(); if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) t = t.slice(1, -1).trim(); if (t.startsWith('{')) return JSON.parse(t); try { return JSON.parse(Buffer.from(t, 'base64').toString('utf8')); } catch (e) { throw new Error('GOOGLE_SA_JSON nav derigs. Pirmais simbols: "' + t.slice(0, 1) + '", garums: ' + t.length); } }
 
 const enabledGsc = () => Boolean(RAW && GSC_SITE);
 const enabledGa4 = () => Boolean(RAW && GA4_PROPERTY);
